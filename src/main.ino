@@ -15,7 +15,9 @@
 */
 typedef struct {
   String  address;
-  int16_t rssi;
+  char*   name;
+  int     rssi;
+  int8_t  txpower;
   bool    isDiscovered;
   long    lastDiscovery;
   bool    isInZone;
@@ -36,6 +38,10 @@ typedef struct {
 #define     DEBUG_PRINTLN(x)
 #endif
 
+#if defined WIFI_KEEP_ON
+bool wifiKeepOn = true;
+#endif
+
 BLEScan*      pBLEScan;
 WiFiClient    wifiClient;
 PubSubClient  mqttClient(wifiClient);
@@ -54,50 +60,67 @@ class MyAdvertisedDeviceCallbacks:
             BLETrackedDevices[i].lastDiscovery = millis();
             BLETrackedDevices[i].toNotify = true;
             BLETrackedDevices[i].rssi = advertisedDevice.getRSSI();
+            BLETrackedDevices[i].name = strdup(advertisedDevice.getManufacturerData().c_str());
+            BLETrackedDevices[i].txpower = advertisedDevice.getTXPower();
 
             DEBUG_PRINT(F("INFO: Tracked device newly discovered, Address: "));
             DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
+            DEBUG_PRINT(F(", NAME: "));
+            DEBUG_PRINTLN(advertisedDevice.getManufacturerData().c_str());
             DEBUG_PRINT(F(", RSSI: "));
             DEBUG_PRINTLN(advertisedDevice.getRSSI());
+            DEBUG_PRINT(F(", TXPOWER: "));
+            DEBUG_PRINTLN(advertisedDevice.getTXPower());
           } else { // Device was already discovered:
             BLETrackedDevices[i].lastDiscovery = millis();
             BLETrackedDevices[i].rssi = advertisedDevice.getRSSI();
+            BLETrackedDevices[i].name = strdup(advertisedDevice.getManufacturerData().c_str());
+            BLETrackedDevices[i].txpower = advertisedDevice.getTXPower();
 
             DEBUG_PRINT(F("INFO: Tracked device discovered, Address: "));
             DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
+            DEBUG_PRINT(F(", NAME: "));
+            DEBUG_PRINTLN(advertisedDevice.getManufacturerData().c_str());
             DEBUG_PRINT(F(", RSSI: "));
             DEBUG_PRINTLN(advertisedDevice.getRSSI());
+            DEBUG_PRINT(F(", TXPOWER: "));
+            DEBUG_PRINTLN(advertisedDevice.getTXPower());
 
-            // If in the proximity zone:
-            if (advertisedDevice.getRSSI() > -80) {
-              // and it was not:
-              if (!BLETrackedDevices[i].isInZone) {
-                BLETrackedDevices[i].isInZone = true;
-                BLETrackedDevices[i].toNotify = true;
-              } else { // and it was already:
-                BLETrackedDevices[i].toNotify = false;
-              }
-              DEBUG_PRINT(F("INFO: Device position: "));
-              DEBUG_PRINTLN(F(LOCATION));
-            }
-            // If out the proximity zone:
-            else {
-              // and it was:
-              if (BLETrackedDevices[i].isInZone) {
-                BLETrackedDevices[i].isInZone = false;
-                BLETrackedDevices[i].toNotify = true;
-              } else { // and it was already:
-                BLETrackedDevices[i].toNotify = false;
-              }
-              DEBUG_PRINT(F("INFO: Device position: "));
-              DEBUG_PRINTLN(F(LOCATION));
-            }
+            // // If in the proximity zone:
+            // if (advertisedDevice.getRSSI() > -80) {
+            //   // and it was not:
+            //   if (!BLETrackedDevices[i].isInZone) {
+            //     BLETrackedDevices[i].isInZone = true;
+            //     BLETrackedDevices[i].toNotify = true;
+            //   } else { // and it was already:
+            //     BLETrackedDevices[i].toNotify = false;
+            //   }
+            //   DEBUG_PRINT(F("INFO: Device position: "));
+            //   DEBUG_PRINTLN(F(LOCATION));
+            // }
+            // // If out the proximity zone:
+            // else {
+            //   // and it was:
+            //   if (BLETrackedDevices[i].isInZone) {
+            //     BLETrackedDevices[i].isInZone = false;
+            //     BLETrackedDevices[i].toNotify = true;
+            //   } else { // and it was already:
+            //     BLETrackedDevices[i].toNotify = false;
+            //   }
+            //   DEBUG_PRINT(F("INFO: Device position: "));
+            //   DEBUG_PRINTLN(F(LOCATION));
+            // }
+            BLETrackedDevices[i].toNotify = true;
           }
         } else {
           DEBUG_PRINT(F("INFO: Device discovered, Address: "));
           DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
+          DEBUG_PRINT(F(", NAME: "));
+          DEBUG_PRINTLN(advertisedDevice.getName().c_str());
           DEBUG_PRINT(F(", RSSI: "));
           DEBUG_PRINTLN(advertisedDevice.getRSSI());
+          DEBUG_PRINT(F(", TXPOWER: "));
+          DEBUG_PRINTLN(advertisedDevice.getTXPower());
         }
       }
     }
@@ -108,10 +131,15 @@ class MyAdvertisedDeviceCallbacks:
 ///////////////////////////////////////////////////////////////////////////
 volatile unsigned long lastMQTTConnection = 0;
 char MQTT_CLIENT_ID[7] = {0};
-char BLE_ADDRESS[17] = {0};
-char MQTT_AVAILABILITY_TOPIC[sizeof(MQTT_CLIENT_ID) + sizeof(MQTT_AVAILABILITY_TOPIC_TEMPLATE) - 2] = {0};
-char MQTT_RSSI[4] = {0};
-char MQTT_SENSOR_PAYLOAD[sizeof(MQTT_SENSOR_PAYLOAD_TEMPLATE) + sizeof(MQTT_CLIENT_ID) + sizeof(MQTT_RSSI) - 2] = {0};
+char BLE_ADDRESS[18] = {0};
+char BLE_NAME[32] = {0};
+char BLE_DISTANCE[6] = {0};
+char BLE_TXPOWER[4] = {0};
+char MQTT_AVAILABILITY_TOPIC[sizeof(MQTT_CLIENT_ID) + sizeof(MQTT_AVAILABILITY_TOPIC_TEMPLATE) -2] = {0};
+char BLE_RSSI[4] = {0};
+// char MQTT_SENSOR_PAYLOAD[512] = {0};
+char MQTT_SENSOR_PAYLOAD[sizeof(MQTT_SENSOR_PAYLOAD_TEMPLATE) + sizeof(BLE_ADDRESS) + sizeof(BLE_NAME) + sizeof(BLE_RSSI) + sizeof(BLE_DISTANCE) - 2] = {0};
+
 /*
   Function called to publish to a MQTT topic with the given payload
 */
@@ -184,6 +212,30 @@ void setup() {
 
 }
 
+float calculateDistance(int rssi, int8_t txpower)
+{
+  float ret = -1;
+  // Cheating with txpower when missing
+  if (txpower == 0) { txpower = 75;}
+  DEBUG_PRINT(F("txpower after correction: "));
+  DEBUG_PRINTLN(txpower);
+  if ( txpower > 0 && rssi < 0 ) {
+    DEBUG_PRINTLN(F("Enter the if"));
+    float ratio = (float) rssi / (float) txpower ;
+    DEBUG_PRINT(F("Ratio is:"));
+    DEBUG_PRINTLN(ratio);
+    if ( ratio < 1 ) {
+      ret = pow(ratio,10);
+      DEBUG_PRINTLN(F("Enter the if ratio < 1"));
+    }
+    else {
+      DEBUG_PRINTLN(F("Enter the else"));
+      ret = 0.89976 * pow(ratio,7.7095) +0.111;
+    }
+  }
+  return fabs(ret);
+}
+
 void loop() {
   pBLEScan->start(BLE_SCANNING_PERIOD);
 
@@ -198,22 +250,24 @@ void loop() {
     }
   }
 
-  if (enableWifi) {
+  if (enableWifi || wifiKeepOn) {
     enableWifi = false;
 
-    DEBUG_PRINT(F("INFO: WiFi connecting to: "));
-    DEBUG_PRINTLN(WIFI_SSID);
-    delay(10);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    randomSeed(micros());
+    if ((WiFi.status() != WL_CONNECTED)) {
+      DEBUG_PRINT(F("INFO: WiFi connecting to: "));
+      DEBUG_PRINTLN(WIFI_SSID);
+      delay(10);
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      randomSeed(micros());
 
-    while (WiFi.status() != WL_CONNECTED) {
-      DEBUG_PRINT(F("."));
-      delay(500);
+      while (WiFi.status() != WL_CONNECTED) {
+        DEBUG_PRINT(F("."));
+        delay(500);
+      }
+      DEBUG_PRINTLN();
+      DEBUG_PRINTLN(WiFi.localIP());
     }
-    DEBUG_PRINTLN();
-    DEBUG_PRINTLN(WiFi.localIP());
 
     while (!mqttClient.connected()) {
       connectToMQTT();
@@ -225,20 +279,34 @@ void loop() {
         String tmp_string_ble_address = BLETrackedDevices[i].address;
         tmp_string_ble_address.toCharArray(BLE_ADDRESS, sizeof(BLE_ADDRESS));
 
-        sprintf(MQTT_RSSI, "%d", BLETrackedDevices[i].rssi);
+        String tmp_string_ble_name = BLETrackedDevices[i].name;
+        tmp_string_ble_name.toCharArray(BLE_NAME, sizeof(BLE_NAME));
 
-        sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, MQTT_RSSI);
+        sprintf(BLE_TXPOWER, "%d", BLETrackedDevices[i].txpower);
+        sprintf(BLE_RSSI, "%d", BLETrackedDevices[i].rssi);
 
-        if (BLETrackedDevices[i].isDiscovered) {
-          publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_SENSOR_PAYLOAD);
-        } else {
-          publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_PAYLOAD_AWAY);
-        }
+        // Calculate BLE_DISTANCE
+        sprintf(BLE_DISTANCE,"%6g",calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower));
+
+        DEBUG_PRINT(F("DISTANCE: "));
+        DEBUG_PRINTLN(calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower));
+
+        DEBUG_PRINT(F(", RSSI before mqtt: "));
+        DEBUG_PRINTLN(BLETrackedDevices[i].rssi);
+        DEBUG_PRINT(F(", TXPOWER before mqtt: "));
+        DEBUG_PRINTLN(BLETrackedDevices[i].txpower);
+
+        // sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_NAME, BLE_RSSI, BLE_DISTANCE);
+        sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_RSSI, BLE_DISTANCE);
+        publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_SENSOR_PAYLOAD);
+
         BLETrackedDevices[i].toNotify = false;
       }
     }
 
     mqttClient.disconnect();
-    WiFi.mode(WIFI_OFF);
+    if(!wifiKeepOn) {
+      WiFi.mode(WIFI_OFF);
+    }
   }
 }

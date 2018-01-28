@@ -35,9 +35,10 @@ BLETrackedDevice BLETrackedDevices[NB_OF_BLE_TRACKED_DEVICES] = {
 #define MQTT_CONNECTION_TIMEOUT 5000 // [ms]
 
 // MQTT availability: available/unavailable
-#define MQTT_AVAILABILITY_TOPIC_TEMPLATE  "%s/availability" 
+#define MQTT_AVAILABILITY_TOPIC_TEMPLATE  "stat/%s/POWER"
 // MQTT binary sensor: <CHIP_ID>/sensor/<LOCATION>/<BLE_ADDRESS>
-#define MQTT_SENSOR_TOPIC_TEMPLATE        "%s/sensor/%s/%s/state"
+#define MQTT_SENSOR_TOPIC_TEMPLATE        "presence/%s"
+#define MQTT_SENSOR_PAYLOAD_TEMPLATE     "{\"id\":\"%s\",\"rssi\":%s,\"distance\":%s}"
 
 #define MQTT_PAYLOAD_ON   "ON"
 #define MQTT_PAYLOAD_OFF  "OFF"
