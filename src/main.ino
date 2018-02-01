@@ -28,6 +28,11 @@ typedef struct {
 #include <BLEDevice.h>
 #include "config.h"
 #include <WiFi.h>
+#if defined SYSLOG
+  #include <WiFiUdp.h>
+  #include <Syslog.h>
+#endif
+#include <SPI.h>
 #include <PubSubClient.h> // https://github.com/knolleary/pubsubclient
 
 #if defined(DEBUG_SERIAL)
@@ -38,9 +43,17 @@ typedef struct {
 #define     DEBUG_PRINTLN(x)
 #endif
 
-#if defined WIFI_KEEP_ON
-bool wifiKeepOn = true;
+
+#if defined SYSLOG
+WiFiUDP udpClient;
+Syslog syslog(udpClient, SYSLOG_PROTO_IETF);
 #endif
+
+#if defined WIFI_KEEP_ON
+static bool wifiKeepOn = true;
+#endif
+
+static float distance;
 
 BLEScan*      pBLEScan;
 WiFiClient    wifiClient;
@@ -65,11 +78,11 @@ class MyAdvertisedDeviceCallbacks:
 
             DEBUG_PRINT(F("INFO: Tracked device newly discovered, Address: "));
             DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
-            DEBUG_PRINT(F(", NAME: "));
+            DEBUG_PRINT(F("NAME: "));
             DEBUG_PRINTLN(advertisedDevice.getManufacturerData().c_str());
-            DEBUG_PRINT(F(", RSSI: "));
+            DEBUG_PRINT(F("RSSI: "));
             DEBUG_PRINTLN(advertisedDevice.getRSSI());
-            DEBUG_PRINT(F(", TXPOWER: "));
+            DEBUG_PRINT(F("TXPOWER: "));
             DEBUG_PRINTLN(advertisedDevice.getTXPower());
           } else { // Device was already discovered:
             BLETrackedDevices[i].lastDiscovery = millis();
@@ -79,47 +92,23 @@ class MyAdvertisedDeviceCallbacks:
 
             DEBUG_PRINT(F("INFO: Tracked device discovered, Address: "));
             DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
-            DEBUG_PRINT(F(", NAME: "));
+            DEBUG_PRINT(F("NAME: "));
             DEBUG_PRINTLN(advertisedDevice.getManufacturerData().c_str());
-            DEBUG_PRINT(F(", RSSI: "));
+            DEBUG_PRINT(F("RSSI: "));
             DEBUG_PRINTLN(advertisedDevice.getRSSI());
-            DEBUG_PRINT(F(", TXPOWER: "));
+            DEBUG_PRINT(F("TXPOWER: "));
             DEBUG_PRINTLN(advertisedDevice.getTXPower());
 
-            // // If in the proximity zone:
-            // if (advertisedDevice.getRSSI() > -80) {
-            //   // and it was not:
-            //   if (!BLETrackedDevices[i].isInZone) {
-            //     BLETrackedDevices[i].isInZone = true;
-            //     BLETrackedDevices[i].toNotify = true;
-            //   } else { // and it was already:
-            //     BLETrackedDevices[i].toNotify = false;
-            //   }
-            //   DEBUG_PRINT(F("INFO: Device position: "));
-            //   DEBUG_PRINTLN(F(LOCATION));
-            // }
-            // // If out the proximity zone:
-            // else {
-            //   // and it was:
-            //   if (BLETrackedDevices[i].isInZone) {
-            //     BLETrackedDevices[i].isInZone = false;
-            //     BLETrackedDevices[i].toNotify = true;
-            //   } else { // and it was already:
-            //     BLETrackedDevices[i].toNotify = false;
-            //   }
-            //   DEBUG_PRINT(F("INFO: Device position: "));
-            //   DEBUG_PRINTLN(F(LOCATION));
-            // }
             BLETrackedDevices[i].toNotify = true;
           }
         } else {
           DEBUG_PRINT(F("INFO: Device discovered, Address: "));
           DEBUG_PRINT(advertisedDevice.getAddress().toString().c_str());
-          DEBUG_PRINT(F(", NAME: "));
+          DEBUG_PRINT(F("NAME: "));
           DEBUG_PRINTLN(advertisedDevice.getName().c_str());
-          DEBUG_PRINT(F(", RSSI: "));
+          DEBUG_PRINT(F("RSSI: "));
           DEBUG_PRINTLN(advertisedDevice.getRSSI());
-          DEBUG_PRINT(F(", TXPOWER: "));
+          DEBUG_PRINT(F("TXPOWER: "));
           DEBUG_PRINTLN(advertisedDevice.getTXPower());
         }
       }
@@ -210,34 +199,41 @@ void setup() {
       DEBUG_PRINTLN(BLETrackedDevices[i].mqttTopic);
   }
 
+  syslog.server(SYSLOG_SERVER, SYSLOG_PORT);
+  syslog.deviceHostname(DEVICE_HOSTNAME);
+  syslog.appName(APP_NAME);
+  syslog.defaultPriority(LOG_KERN);
+
 }
 
-float calculateDistance(int rssi, int8_t txpower)
-{
-  float ret = -1;
+float calculateDistance(int rssi, int8_t txpower) {
+  distance = -1;
   // Cheating with txpower when missing
-  if (txpower == 0) { txpower = 75;}
-  DEBUG_PRINT(F("txpower after correction: "));
-  DEBUG_PRINTLN(txpower);
+  if (txpower == 0) { txpower = TX_POWER;}
   if ( txpower > 0 && rssi < 0 ) {
-    DEBUG_PRINTLN(F("Enter the if"));
     float ratio = (float) rssi / (float) txpower ;
-    DEBUG_PRINT(F("Ratio is:"));
-    DEBUG_PRINTLN(ratio);
     if ( ratio < 1 ) {
-      ret = pow(ratio,10);
-      DEBUG_PRINTLN(F("Enter the if ratio < 1"));
+      distance = pow(ratio,10);
     }
     else {
-      DEBUG_PRINTLN(F("Enter the else"));
-      ret = 0.89976 * pow(ratio,7.7095) +0.111;
+      distance = 0.89976 * pow(ratio,7.7095) +0.111;
     }
   }
-  return fabs(ret);
+  return fabs(distance);
+}
+
+void checkAvailableMemory() {
+  if(esp_get_free_heap_size() < LOW_MEMORY_THRESHOLD) {
+    syslog.logf(LOG_INFO, "Memory low, restarting...");
+    DEBUG_PRINTLN(F("Memory low, restarting..."));
+    ESP.restart();
+  }
 }
 
 void loop() {
+  checkAvailableMemory();
   pBLEScan->start(BLE_SCANNING_PERIOD);
+  int timeout=0;
 
   static boolean enableWifi = false;
   for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
@@ -253,6 +249,10 @@ void loop() {
   if (enableWifi || wifiKeepOn) {
     enableWifi = false;
 
+    syslog.logf(LOG_DEBUG, "Memory loop start: %d", esp_get_free_heap_size());
+    DEBUG_PRINT(F("INFO: WiFi status: "));
+    DEBUG_PRINTLN(WiFi.status());
+
     if ((WiFi.status() != WL_CONNECTED)) {
       DEBUG_PRINT(F("INFO: WiFi connecting to: "));
       DEBUG_PRINTLN(WIFI_SSID);
@@ -261,18 +261,22 @@ void loop() {
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
       randomSeed(micros());
 
-      while (WiFi.status() != WL_CONNECTED) {
+      while (WiFi.status() != WL_CONNECTED && timeout < 40) {
         DEBUG_PRINT(F("."));
         delay(500);
+        timeout++;
       }
+      timeout=0;
       DEBUG_PRINTLN();
       DEBUG_PRINTLN(WiFi.localIP());
     }
 
-    while (!mqttClient.connected()) {
+    while (!mqttClient.connected() && timeout < 5) {
       connectToMQTT();
+      timeout++;
+      DEBUG_PRINTLN(timeout);
     }
-
+    timeout = 0;
     for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
       if (BLETrackedDevices[i].toNotify) {
 
@@ -282,21 +286,11 @@ void loop() {
         String tmp_string_ble_name = BLETrackedDevices[i].name;
         tmp_string_ble_name.toCharArray(BLE_NAME, sizeof(BLE_NAME));
 
-        sprintf(BLE_TXPOWER, "%d", BLETrackedDevices[i].txpower);
         sprintf(BLE_RSSI, "%d", BLETrackedDevices[i].rssi);
 
         // Calculate BLE_DISTANCE
         sprintf(BLE_DISTANCE,"%6g",calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower));
 
-        DEBUG_PRINT(F("DISTANCE: "));
-        DEBUG_PRINTLN(calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower));
-
-        DEBUG_PRINT(F(", RSSI before mqtt: "));
-        DEBUG_PRINTLN(BLETrackedDevices[i].rssi);
-        DEBUG_PRINT(F(", TXPOWER before mqtt: "));
-        DEBUG_PRINTLN(BLETrackedDevices[i].txpower);
-
-        // sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_NAME, BLE_RSSI, BLE_DISTANCE);
         sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_RSSI, BLE_DISTANCE);
         publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_SENSOR_PAYLOAD);
 
