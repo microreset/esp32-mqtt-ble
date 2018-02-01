@@ -26,13 +26,13 @@ typedef struct {
 } BLETrackedDevice;
 // #include <string>
 #include <BLEDevice.h>
+#include "Filter.h"    // From MegunoLink by Number Eight Innovation
 #include "config.h"
-#include <WiFi.h>
+#include <WiFi.h>      // Syslog by Martin Sloup
 #if defined SYSLOG
   #include <WiFiUdp.h>
-  #include <Syslog.h>
+  #include <Syslog.h>  // From
 #endif
-#include <SPI.h>
 #include <PubSubClient.h> // https://github.com/knolleary/pubsubclient
 
 #if defined(DEBUG_SERIAL)
@@ -58,6 +58,7 @@ static float distance;
 BLEScan*      pBLEScan;
 WiFiClient    wifiClient;
 PubSubClient  mqttClient(wifiClient);
+ExponentialFilter<float> ADCFilter(FILTER_FACTOR, 0);
 
 ///////////////////////////////////////////////////////////////////////////
 //   BLUETOOTH
@@ -289,7 +290,9 @@ void loop() {
         sprintf(BLE_RSSI, "%d", BLETrackedDevices[i].rssi);
 
         // Calculate BLE_DISTANCE
-        sprintf(BLE_DISTANCE,"%6g",calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower));
+        distance=calculateDistance(BLETrackedDevices[i].rssi,BLETrackedDevices[i].txpower);
+        ADCFilter.Filter(distance);
+        sprintf(BLE_DISTANCE,"%6g",distance);
 
         sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_RSSI, BLE_DISTANCE);
         publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_SENSOR_PAYLOAD);
