@@ -190,8 +190,6 @@ void setup() {
   DEBUG_PRINT(F("INFO: MQTT availability topic: "));
   DEBUG_PRINTLN(MQTT_AVAILABILITY_TOPIC);
 
-  // presence/mimibed
-  // sizeof(MQTT_CLIENT_ID)
   char mqttTopic[sizeof(MQTT_SENSOR_TOPIC_TEMPLATE) + sizeof(LOCATION) - 4] = {0};
   for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
       sprintf(mqttTopic, MQTT_SENSOR_TOPIC_TEMPLATE, LOCATION);
