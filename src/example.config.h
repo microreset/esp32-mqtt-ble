@@ -13,7 +13,7 @@ BLETrackedDevice BLETrackedDevices[NB_OF_BLE_TRACKED_DEVICES] = {
 // Location of the BLE scanner
 #define LOCATION ""
 #define TX_POWER 72
-#define FILTER_FACTOR 60  //Between 0 and 100. 0 favors oldest values (slower/smoother), 100 favors the more recent ones (faster/more dynamic)
+#define FILTER_FACTOR 40  //Between 0 and 100. 0 favors oldest values (slower/smoother), 100 favors the more recent ones (faster/more dynamic)
 
 // Debug output
 // #define DEBUG_SERIAL
@@ -24,7 +24,8 @@ BLETrackedDevice BLETrackedDevices[NB_OF_BLE_TRACKED_DEVICES] = {
 // #define WIFI_KEEP_ON
 
 // Syslog server connection info
-// #define SYSLOG          // uncomment to activate syslog
+#define DEBUG_SYSLOG          // uncomment to activate syslog
+#define SYSLOG_LEVEL LOG_DEBUG
 #define SYSLOG_SERVER ""
 #define SYSLOG_PORT 514
 // This device info
