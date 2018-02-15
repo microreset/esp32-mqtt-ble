@@ -163,8 +163,10 @@ void connectToMQTT() {
     if (lastMQTTConnection < millis()) {
       if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, MQTT_AVAILABILITY_TOPIC, 0, 1, MQTT_PAYLOAD_UNAVAILABLE)) {
         DEBUG_PRINTLN(F("INFO: The client is successfully connected to the MQTT broker"));
+        SYSLOG(LOG_INFO, "INFO: The client is successfully connected to the MQTT broker");
         publishToMQTT(MQTT_AVAILABILITY_TOPIC, MQTT_PAYLOAD_AVAILABLE);
       } else {
+        SYSLOG(LOG_ERR, "ERROR: The connection to the MQTT broker failed");
         DEBUG_PRINTLN(F("ERROR: The connection to the MQTT broker failed"));
         DEBUG_PRINT(F("INFO: MQTT username: "));
         DEBUG_PRINTLN(MQTT_USERNAME);
@@ -290,7 +292,8 @@ void loop() {
       DEBUG_PRINTLN(timeout);
     }
     if (timeout == 5) {
-      SYSLOG(LOG_WARNING,"MQTT: Connexion timeout");
+      SYSLOG(LOG_WARNING,"MQTT: Connexion timeout. Restarting...");
+      ESP.restart();
     }
     timeout = 0;
     for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
