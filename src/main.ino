@@ -26,13 +26,16 @@ typedef struct {
 } BLETrackedDevice;
 // #include <string>
 #include <BLEDevice.h>
+#include <string>
 #include "Filter.h"    // From MegunoLink by Number Eight Innovation
 #include "config.h"
 #include <WiFi.h>      // Syslog by Martin Sloup
-#if defined SYSLOG
+
+#if defined DEBUG_SYSLOG
   #include <WiFiUdp.h>
   #include <Syslog.h>  // From
 #endif
+
 #include <PubSubClient.h> // https://github.com/knolleary/pubsubclient
 
 #if defined(DEBUG_SERIAL)
@@ -44,9 +47,14 @@ typedef struct {
 #endif
 
 
-#if defined SYSLOG
-WiFiUDP udpClient;
-Syslog syslog(udpClient, SYSLOG_PROTO_IETF);
+#if defined DEBUG_SYSLOG
+  WiFiUDP udpClient;
+  Syslog syslog(udpClient, SYSLOG_PROTO_IETF);
+#define SYSLOG(x,y) syslog.logf(x,y)
+#define SYSLOGF(x,y,z) syslog.logf(x,y,z)
+#else
+#define SYSLOG(x,y)
+#define SYSLOGF(x,y,z)
 #endif
 
 #if defined WIFI_KEEP_ON
@@ -127,6 +135,7 @@ char BLE_DISTANCE[6] = {0};
 char BLE_TXPOWER[4] = {0};
 char MQTT_AVAILABILITY_TOPIC[sizeof(MQTT_CLIENT_ID) + sizeof(MQTT_AVAILABILITY_TOPIC_TEMPLATE) -2] = {0};
 char BLE_RSSI[4] = {0};
+char SYSLOG_MSG[1024] = {0};
 // char MQTT_SENSOR_PAYLOAD[512] = {0};
 char MQTT_SENSOR_PAYLOAD[sizeof(MQTT_SENSOR_PAYLOAD_TEMPLATE) + sizeof(BLE_ADDRESS) + sizeof(BLE_NAME) + sizeof(BLE_RSSI) + sizeof(BLE_DISTANCE) - 2] = {0};
 
@@ -177,6 +186,14 @@ void setup() {
   Serial.begin(115200);
 #endif
 
+#if defined(DEBUG_SYSLOG)
+  syslog.server(SYSLOG_SERVER, SYSLOG_PORT);
+  syslog.deviceHostname(DEVICE_HOSTNAME);
+  syslog.appName(APP_NAME);
+  syslog.defaultPriority(LOG_KERN);
+  syslog.logMask(LOG_UPTO(SYSLOG_LEVEL));
+#endif
+
   BLEDevice::init("");
   pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
@@ -189,6 +206,8 @@ void setup() {
 
   DEBUG_PRINT(F("INFO: MQTT availability topic: "));
   DEBUG_PRINTLN(MQTT_AVAILABILITY_TOPIC);
+  SYSLOG(LOG_INFO, "INFO: MQTT availability topic: ");
+  SYSLOG(LOG_INFO, MQTT_AVAILABILITY_TOPIC);
 
   char mqttTopic[sizeof(MQTT_SENSOR_TOPIC_TEMPLATE) + sizeof(LOCATION) - 4] = {0};
   for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
@@ -197,11 +216,6 @@ void setup() {
       DEBUG_PRINT(F("INFO: MQTT sensor topic: "));
       DEBUG_PRINTLN(BLETrackedDevices[i].mqttTopic);
   }
-
-  syslog.server(SYSLOG_SERVER, SYSLOG_PORT);
-  syslog.deviceHostname(DEVICE_HOSTNAME);
-  syslog.appName(APP_NAME);
-  syslog.defaultPriority(LOG_KERN);
 
 }
 
@@ -223,7 +237,7 @@ float calculateDistance(int rssi, int8_t txpower) {
 
 void checkAvailableMemory() {
   if(esp_get_free_heap_size() < LOW_MEMORY_THRESHOLD) {
-    syslog.logf(LOG_INFO, "Memory low, restarting...");
+    SYSLOG(LOG_INFO, "Memory low, restarting...");
     DEBUG_PRINTLN(F("Memory low, restarting..."));
     ESP.restart();
   }
@@ -248,7 +262,7 @@ void loop() {
   if (enableWifi || wifiKeepOn) {
     enableWifi = false;
 
-    syslog.logf(LOG_DEBUG, "Memory loop start: %d", esp_get_free_heap_size());
+    SYSLOGF(LOG_DEBUG, "Memory loop start: %d", esp_get_free_heap_size());
     DEBUG_PRINT(F("INFO: WiFi status: "));
     DEBUG_PRINTLN(WiFi.status());
 
@@ -275,6 +289,9 @@ void loop() {
       timeout++;
       DEBUG_PRINTLN(timeout);
     }
+    if (timeout == 5) {
+      SYSLOG(LOG_WARNING,"MQTT: Connexion timeout");
+    }
     timeout = 0;
     for (uint8_t i = 0; i < NB_OF_BLE_TRACKED_DEVICES; i++) {
       if (BLETrackedDevices[i].toNotify) {
@@ -294,6 +311,11 @@ void loop() {
 
         sprintf(MQTT_SENSOR_PAYLOAD, MQTT_SENSOR_PAYLOAD_TEMPLATE, BLE_ADDRESS, BLE_RSSI, BLE_DISTANCE);
         publishToMQTT(BLETrackedDevices[i].mqttTopic, MQTT_SENSOR_PAYLOAD);
+
+        sprintf(SYSLOG_MSG, "%s %s", BLETrackedDevices[i].mqttTopic,BLE_ADDRESS);
+        SYSLOG(LOG_INFO,SYSLOG_MSG);
+        sprintf(SYSLOG_MSG, "%s %s", BLE_RSSI, BLE_DISTANCE);
+        SYSLOG(LOG_INFO,SYSLOG_MSG);
 
         BLETrackedDevices[i].toNotify = false;
       }
